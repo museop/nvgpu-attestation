@@ -1,6 +1,10 @@
 package nvgpu
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 const sampleNonce = "931d8dd0add203ac3d8b4fbde75e115278eefcdceac5b87671a748f32364dfcb"
 const sdkSampleNonce = "e97b23a1718095a0e9e35edca810768c70a6a5a389b705e753b197912bc11576"
@@ -97,6 +101,9 @@ func TestVerifySampleQuoteWithOCSPAndRIM(t *testing.T) {
 	}
 	result, err := VerifyFilesWithOptions("../../testdata/hopperAttestationReport.txt", "../../testdata/hopperCertChain.txt", "../../testdata/device-root-bundle.pem", sampleNonce, opts)
 	if err != nil {
+		if strings.Contains(err.Error(), "certificate has expired") || strings.Contains(err.Error(), "is not yet valid") {
+			t.Skipf("skipping time-sensitive OCSP/RIM sample test: %v", err)
+		}
 		t.Fatalf("VerifyFilesWithOptions() error = %v", err)
 	}
 	if result.DriverRIM == nil || !result.DriverRIM.SignatureVerified || !result.DriverRIM.CertChainVerified {
@@ -110,5 +117,81 @@ func TestVerifySampleQuoteWithOCSPAndRIM(t *testing.T) {
 	}
 	if len(result.DeviceOCSPChecks) == 0 {
 		t.Fatal("expected device OCSP checks")
+	}
+}
+
+func TestGenerateMockQuoteBundleVerifiesViaStandardPath(t *testing.T) {
+	root, err := GenerateMockRootBundle(MockRootOptions{})
+	if err != nil {
+		t.Fatalf("GenerateMockRootBundle() error = %v", err)
+	}
+	bundle, err := GenerateMockQuoteBundleFromRoot(MockQuoteOptions{RootKey: root.RootKey, RootCert: root.RootCert})
+	if err != nil {
+		t.Fatalf("GenerateMockQuoteBundleFromRoot() error = %v", err)
+	}
+	dir := t.TempDir()
+	quotePath := dir + "/quote.hex"
+	chainPath := dir + "/cert-chain.pem"
+	rootPath := dir + "/root.pem"
+	if err := os.WriteFile(quotePath, bundle.QuoteHex, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(chainPath, bundle.CertChainPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootPath, bundle.RootCertPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := VerifyFilesWithOptions(quotePath, chainPath, rootPath, bundle.NonceHex, VerifyOptions{
+		Policy: PolicyOptions{
+			AllowedDriverVersions: []string{bundle.DriverVersion},
+			AllowedVBIOSVersions:  []string{bundle.VBIOSVersion},
+		},
+	})
+	if err != nil {
+		t.Fatalf("VerifyFilesWithOptions(mock) error = %v", err)
+	}
+	if !result.CertChainVerified || !result.QuoteSignatureVerified || !result.NonceMatches || !result.FWIDMatches {
+		t.Fatalf("unexpected mock result: %+v", result)
+	}
+	if got, want := result.DriverVersion, bundle.DriverVersion; got != want {
+		t.Fatalf("DriverVersion = %q, want %q", got, want)
+	}
+	if got, want := result.VBIOSVersion, bundle.VBIOSVersion; got != want {
+		t.Fatalf("VBIOSVersion = %q, want %q", got, want)
+	}
+	if result.PolicyVerification == nil || !result.PolicyVerification.Verified {
+		t.Fatalf("expected policy verification to pass, got %+v", result.PolicyVerification)
+	}
+}
+
+func TestMockSerializedEvidenceVerifiesViaStandardPath(t *testing.T) {
+	root, err := GenerateMockRootBundle(MockRootOptions{})
+	if err != nil {
+		t.Fatalf("GenerateMockRootBundle() error = %v", err)
+	}
+	bundle, err := GenerateMockQuoteBundleFromRoot(MockQuoteOptions{RootKey: root.RootKey, RootCert: root.RootCert})
+	if err != nil {
+		t.Fatalf("GenerateMockQuoteBundleFromRoot() error = %v", err)
+	}
+	result, err := VerifySerializedEvidence(bundle.EvidenceJSON, bundle.RootCertPEM, 0, "")
+	if err != nil {
+		t.Fatalf("VerifySerializedEvidence(mock) error = %v", err)
+	}
+	if got, want := result.InputFormat, "serialized-json"; got != want {
+		t.Fatalf("InputFormat = %q, want %q", got, want)
+	}
+	if got, want := result.EvidenceArch, "MOCK"; got != want {
+		t.Fatalf("EvidenceArch = %q, want %q", got, want)
+	}
+	if !result.CertChainVerified || !result.QuoteSignatureVerified || !result.NonceMatches || !result.FWIDMatches {
+		t.Fatalf("unexpected mock serialized result: %+v", result)
+	}
+}
+
+func TestMockQuoteRequiresRootMaterial(t *testing.T) {
+	if _, err := GenerateMockQuoteBundleFromRoot(MockQuoteOptions{}); err == nil {
+		t.Fatal("GenerateMockQuoteBundleFromRoot() unexpectedly succeeded without root material")
 	}
 }

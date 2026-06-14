@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -30,14 +31,16 @@ const (
 )
 
 type VerifyOptions struct {
-	VerifyOCSP    bool
-	VerifyRIM     bool
-	OCSPURL       string
-	RIMServiceURL string
-	DriverRIMPath string
-	VBIOSRIMPath  string
-	RIMRootPEM    string
-	SWIDSchemaXSD string
+	VerifyOCSP       bool
+	VerifyRIM        bool
+	OCSPURL          string
+	RIMServiceURL    string
+	DriverRIMPath    string
+	VBIOSRIMPath     string
+	RIMRootPEM       string
+	SWIDSchemaXSD    string
+	VerificationTime time.Time
+	Policy           PolicyOptions
 }
 
 type OCSPCheck struct {
@@ -91,7 +94,7 @@ type goldenMeasurement struct {
 }
 
 func VerifyFilesWithOptions(quotePath, certChainPath, rootsPath, expectedNonceHex string, opts VerifyOptions) (*Result, error) {
-	result, quote, chain, err := verifyFilesDetailed(quotePath, certChainPath, rootsPath, expectedNonceHex)
+	result, quote, chain, err := verifyFilesDetailed(quotePath, certChainPath, rootsPath, expectedNonceHex, opts.VerificationTime)
 	if err != nil {
 		return result, err
 	}
@@ -118,7 +121,7 @@ func VerifySerializedEvidenceFileWithOptions(jsonPath, rootsPath string, index i
 		return nil, fmt.Errorf("serialized evidence index out of range: got %d, valid range is 0..%d", index, len(entries)-1)
 	}
 	entry := entries[index]
-	res, quote, chain, err := verifySerializedEntryDetailed(entry, rootsData, expectedNonceHex)
+	res, quote, chain, err := verifySerializedEntryDetailed(entry, rootsData, expectedNonceHex, opts.VerificationTime)
 	if err != nil {
 		return res, err
 	}
@@ -143,7 +146,7 @@ func VerifySerializedEvidenceAllFileWithOptions(jsonPath, rootsPath, expectedNon
 	}
 	items := make([]BatchItem, 0, len(entries))
 	for i, entry := range entries {
-		result, quote, chain, verifyErr := verifySerializedEntryDetailed(entry, rootsData, expectedNonceHex)
+		result, quote, chain, verifyErr := verifySerializedEntryDetailed(entry, rootsData, expectedNonceHex, opts.VerificationTime)
 		if verifyErr == nil {
 			verifyErr = enrichResult(result, quote, chain, opts)
 		}
@@ -156,7 +159,7 @@ func VerifySerializedEvidenceAllFileWithOptions(jsonPath, rootsPath, expectedNon
 	return items, nil
 }
 
-func verifyFilesDetailed(quotePath, certChainPath, rootsPath, expectedNonceHex string) (*Result, *Quote, []*x509.Certificate, error) {
+func verifyFilesDetailed(quotePath, certChainPath, rootsPath, expectedNonceHex string, verificationTime time.Time) (*Result, *Quote, []*x509.Certificate, error) {
 	quoteData, err := os.ReadFile(quotePath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read quote: %w", err)
@@ -169,10 +172,10 @@ func verifyFilesDetailed(quotePath, certChainPath, rootsPath, expectedNonceHex s
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read roots: %w", err)
 	}
-	return verifyDetailed(quoteData, chainData, rootsData, expectedNonceHex, "split-files", "")
+	return verifyDetailed(quoteData, chainData, rootsData, expectedNonceHex, "split-files", "", verificationTime)
 }
 
-func verifySerializedEntryDetailed(entry SerializedEvidenceEntry, rootsPEM []byte, expectedNonceHex string) (*Result, *Quote, []*x509.Certificate, error) {
+func verifySerializedEntryDetailed(entry SerializedEvidenceEntry, rootsPEM []byte, expectedNonceHex string, verificationTime time.Time) (*Result, *Quote, []*x509.Certificate, error) {
 	nonceHex := strings.TrimSpace(expectedNonceHex)
 	if nonceHex == "" {
 		nonceHex = entry.Nonce
@@ -185,10 +188,10 @@ func verifySerializedEntryDetailed(entry SerializedEvidenceEntry, rootsPEM []byt
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("decode serialized quote: %w", err)
 	}
-	return verifyDetailed(quoteRaw, certChainPEM, rootsPEM, nonceHex, "serialized-json", entry.Arch)
+	return verifyDetailed(quoteRaw, certChainPEM, rootsPEM, nonceHex, "serialized-json", entry.Arch, verificationTime)
 }
 
-func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex, inputFormat, evidenceArch string) (*Result, *Quote, []*x509.Certificate, error) {
+func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex, inputFormat, evidenceArch string, verificationTime time.Time) (*Result, *Quote, []*x509.Certificate, error) {
 	quoteRaw, err := decodeHexOrRaw(quoteInput)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("decode quote: %w", err)
@@ -212,7 +215,7 @@ func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	verifiedChains, err := verifyCertChain(chain, roots, rootPool)
+	verifiedChains, err := verifyCertChain(chain, roots, rootPool, verificationTime)
 	if err != nil {
 		return nil, nil, chain, err
 	}
@@ -230,6 +233,9 @@ func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex,
 		VerifiedChains:          verifiedChains,
 		InputFormat:             inputFormat,
 		EvidenceArch:            evidenceArch,
+	}
+	if !verificationTime.IsZero() {
+		result.VerificationTime = verificationTime.Format(time.RFC3339)
 	}
 	if !result.NonceMatches {
 		return result, quote, chain, fmt.Errorf("nonce mismatch: expected %s, quote carries %s", result.ExpectedNonce, result.QuoteNonce)
@@ -281,6 +287,13 @@ func enrichResult(result *Result, quote *Quote, chain []*x509.Certificate, opts 
 		result.VBIOSRIM = vbiosInfo
 		if err != nil {
 			return err
+		}
+	}
+	if opts.Policy.Enabled() {
+		policy := AppraisePolicy(result, opts.Policy)
+		result.PolicyVerification = policy
+		if !policy.Verified {
+			return errors.New("policy verification failed")
 		}
 	}
 	return nil
@@ -407,7 +420,7 @@ func loadAndVerifyRIM(id, source, expectedVersion, localPath string, opts Verify
 	if err != nil {
 		return nil, info, fmt.Errorf("parse rim root bundle: %w", err)
 	}
-	_, err = verifyCertChain(doc.Certs, roots, rootPool)
+	_, err = verifyCertChain(doc.Certs, roots, rootPool, opts.VerificationTime)
 	if err != nil {
 		return nil, info, fmt.Errorf("%s rim cert chain verification failed: %w", source, err)
 	}

@@ -16,6 +16,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -94,6 +95,8 @@ type Result struct {
 	DriverRIM               *RIMVerification    `json:"driver_rim,omitempty"`
 	VBIOSRIM                *RIMVerification    `json:"vbios_rim,omitempty"`
 	MeasurementVerification *MeasurementSummary `json:"measurement_verification,omitempty"`
+	PolicyVerification      *PolicyResult       `json:"policy_verification,omitempty"`
+	VerificationTime        string              `json:"verification_time,omitempty"`
 }
 
 type SerializedEvidenceEntry struct {
@@ -182,7 +185,7 @@ func Verify(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex string) 
 		return nil, err
 	}
 
-	verifiedChains, err := verifyCertChain(chain, roots, rootPool)
+	verifiedChains, err := verifyCertChain(chain, roots, rootPool, time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +430,7 @@ func parseRootBundle(data []byte) ([]*x509.Certificate, *x509.CertPool, error) {
 	return certs, pool, nil
 }
 
-func verifyCertChain(chain []*x509.Certificate, roots []*x509.Certificate, rootPool *x509.CertPool) ([][]string, error) {
+func verifyCertChain(chain []*x509.Certificate, roots []*x509.Certificate, rootPool *x509.CertPool, verificationTime time.Time) ([][]string, error) {
 	intermediates := x509.NewCertPool()
 	for _, cert := range chain[1:] {
 		if !isRootCertificate(cert, roots) {
@@ -438,6 +441,7 @@ func verifyCertChain(chain []*x509.Certificate, roots []*x509.Certificate, rootP
 		Roots:         rootPool,
 		Intermediates: intermediates,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		CurrentTime:   verificationTime,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("certificate chain verification failed: %w", err)
