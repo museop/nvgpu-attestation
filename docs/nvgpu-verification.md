@@ -281,6 +281,26 @@ openssl ocsp \
 
 > 운영 환경에서는 OCSP 응답 signature, responder certificate chain, nonce, validity interval을 엄격하게 검증하는 것이 좋습니다. 이 저장소는 학습/예제 성격이므로 일부 검증은 OpenSSL 출력 파싱에 의존합니다.
 
+## OCSP와 RIM Service는 무엇이 다른가?
+
+둘 다 네트워크를 사용할 수 있어서 혼동하기 쉽지만, 검증자가 묻는 질문이 다릅니다.
+
+| 구분 | OCSP | RIM Service |
+| --- | --- | --- |
+| 핵심 질문 | “이 인증서를 아직 신뢰해도 되는가?” | “이 driver/VBIOS 조합의 기대 measurement는 무엇인가?” |
+| 입력 | 검증 대상 certificate + issuer certificate | RIM ID, 예: `NV_GPU_DRIVER_GH100_550.90.07` |
+| 출력 | certificate status: `good`, `revoked`, `unknown` 등 | NVIDIA가 서명한 SWID XML RIM(`.swidtag`) |
+| 이 저장소 기본 endpoint | `https://ocsp.ndis.nvidia.com` | `https://rim.attestation.nvidia.com/v1/rim/<RIM_ID>` |
+| 검증 대상 | device cert chain, RIM signing cert chain의 revocation 상태 | quote runtime measurement와 비교할 golden measurement 문서 |
+| 실패 의미 | 인증서가 폐기/정지되었거나 responder가 상태를 판단할 수 없음 | RIM ID가 잘못되었거나, 해당 version이 없거나, service/API 접근 문제가 있음 |
+
+따라서 `--verify-ocsp`와 `--verify-rim`은 서로 대체 관계가 아닙니다.
+
+- `--verify-ocsp`는 **device certificate chain**의 revocation 상태를 확인합니다.
+- `--verify-rim`은 RIM을 가져오거나 로컬 파일을 읽고, 그 RIM의 schema/cert chain/signature를 검증한 뒤 measurement를 비교합니다. 이 과정에서 RIM 안에 포함된 signing certificate chain도 신뢰해야 하므로 **RIM 검증 중에도 OCSP를 호출**합니다.
+
+즉 `--verify-rim` 실행 중 보이는 OCSP 질의는 “RIM Service에 물어보는 것”이 아니라, RIM 문서를 서명한 certificate가 현재 폐기되지 않았는지 확인하는 별도 단계입니다.
+
 ## RIM이란 무엇인가?
 
 RIM(Reference Integrity Manifest)은 verifier가 runtime evidence를 평가할 때 사용하는 **정답지(golden measurements)** 입니다.
@@ -451,6 +471,15 @@ go run ./cmd/nvgpu-attest verify --json
 
 > 현재 저장소의 샘플 driver RIM certificate는 2026-06-01T02:08:29Z 이후 현재 시간 기준으로 만료 상태가 될 수 있습니다. 재현 목적이면 `--time 2026-05-25T00:00:00Z`처럼 certificate validity 기준 시간을 지정할 수 있습니다. 운영 검증에는 최신 RIM과 root/certificate bundle을 사용하세요. 기본 quote/cert/signature 검증(`go run ./cmd/nvgpu-attest verify --json`)은 이 만료 이슈와 별개입니다.
 
+검증 층을 분리해서 보면 다음과 같습니다.
+
+1. 기본 검증: nonce, device cert chain, quote signature, FWID match를 확인합니다.
+2. `--verify-ocsp`: device cert chain의 revocation 상태를 NVIDIA OCSP로 확인합니다.
+3. `--verify-rim`: driver/VBIOS RIM을 로컬 파일 또는 RIM Service에서 확보합니다.
+4. RIM 자체 검증: RIM schema, embedded cert chain, RIM signing cert OCSP, XML signature를 확인합니다.
+5. Measurement appraisal: quote runtime measurement와 RIM active golden measurement를 비교합니다.
+6. Policy appraisal: 필요하면 driver/VBIOS/architecture allowlist와 `--policy-require-*` 조건을 적용합니다.
+
 로컬 RIM 사용:
 
 ```bash
@@ -469,8 +498,13 @@ RIM Service fetch 사용:
 go run ./cmd/nvgpu-attest verify \
   --verify-ocsp \
   --verify-rim \
+  --time 2026-05-25T00:00:00Z \
   --json
 ```
+
+샘플 evidence 재현에서는 로컬 RIM을 쓰든 RIM Service에서 fetch하든 같은 certificate validity 기준이 적용됩니다. 예를 들어 이 저장소의 Hopper 샘플이 요구하는 driver RIM ID `NV_GPU_DRIVER_GH100_550.90.07`의 signing certificate가 현재 시간 기준으로 만료되어 있으면, RIM fetch 자체가 성공해도 RIM cert chain 검증에서 실패하는 것이 정상입니다. 이 경우 실패 원인은 RIM Service와 OCSP가 같은 서비스인지 여부가 아니라, **가져온 RIM을 서명한 certificate의 NotAfter가 검증 기준 시간보다 과거**이기 때문입니다.
+
+운영 검증에서는 과거 `--time`으로 우회하지 말고, fresh evidence와 현재 driver/VBIOS에 맞는 최신 RIM 및 trust bundle을 사용해야 합니다. `--time`은 샘플 재현이나 회귀 테스트처럼 과거 기준의 validity를 확인해야 할 때만 사용하세요.
 
 ## Local verifier와 NRAS의 차이
 
@@ -491,6 +525,8 @@ go run ./cmd/nvgpu-attest verify \
 | OCSP `revoked` | 인증서 폐기 | 즉시 실패 처리 권장 |
 | OCSP `unknown` | 잘못된 issuer/cert 쌍, responder 문제 | issuer pair와 endpoint 확인 |
 | RIM fetch failed | RIM ID 계산 오류, service/network 문제, 미등록 version | driver/VBIOS version 및 project/SKU/chip 값 확인 |
+| RIM cert chain expired/not yet valid | RIM Service나 로컬 파일에서 가져온 RIM의 embedded signing certificate가 검증 기준 시간에 유효하지 않음 | `--time` 기준, RIM signing cert NotBefore/NotAfter, 최신 RIM 여부 확인 |
+| RIM OCSP failed | RIM signing certificate chain의 revocation status가 `good`이 아니거나 OCSP 질의 실패 | OCSP endpoint, issuer/cert pair, responder 응답 확인 |
 | RIM signature failed | RIM 변조, XML canonicalization 문제 | schema/c14n/embedded cert 확인 |
 | measurement mismatch | GPU firmware 상태가 기대값과 다름, 다른 RIM 사용 | RIM version match와 active index conflict 확인 |
 

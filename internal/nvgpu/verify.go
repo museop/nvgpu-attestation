@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -159,80 +158,8 @@ func VerifySerializedEvidenceAllFile(jsonPath, rootsPath string, expectedNonceHe
 }
 
 func Verify(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex string) (*Result, error) {
-	quoteRaw, err := decodeHexOrRaw(quoteInput)
-	if err != nil {
-		return nil, fmt.Errorf("decode quote: %w", err)
-	}
-	quote, err := ParseQuote(quoteRaw)
-	if err != nil {
-		return nil, err
-	}
-
-	chain, err := parsePEMCertificates(certChainPEM)
-	if err != nil {
-		return nil, fmt.Errorf("parse cert chain: %w", err)
-	}
-	if len(chain) == 0 {
-		return nil, errors.New("certificate chain is empty")
-	}
-	roots, rootPool, err := parseRootBundle(rootsPEM)
-	if err != nil {
-		return nil, fmt.Errorf("parse root bundle: %w", err)
-	}
-
-	expectedNonce, err := parseNonce(expectedNonceHex)
-	if err != nil {
-		return nil, err
-	}
-
-	verifiedChains, err := verifyCertChain(chain, roots, rootPool, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-
-	leaf := chain[0]
-	result := &Result{
-		QuoteSHA256:             sha256Hex(quote.Raw),
-		CertChainVerified:       true,
-		ExpectedNonce:           hex.EncodeToString(expectedNonce),
-		QuoteNonce:              hex.EncodeToString(quote.Request.Nonce),
-		ResponseNonce:           hex.EncodeToString(quote.Response.Nonce),
-		NonceMatches:            bytes.Equal(expectedNonce, quote.Request.Nonce),
-		MeasurementBlockCount:   int(quote.Response.MeasurementBlockCount),
-		MeasurementRecordLength: quote.Response.MeasurementRecordLength,
-		LeafSubject:             leaf.Subject.String(),
-		VerifiedChains:          verifiedChains,
-	}
-	if !result.NonceMatches {
-		return result, fmt.Errorf("nonce mismatch: expected %s, quote carries %s", result.ExpectedNonce, result.QuoteNonce)
-	}
-
-	if sigOK, err := verifyQuoteSignature(quote.Raw, quote.Response.Signature, leaf.PublicKey); err != nil {
-		return result, err
-	} else {
-		result.QuoteSignatureVerified = sigOK
-	}
-	if !result.QuoteSignatureVerified {
-		return result, errors.New("quote signature verification failed")
-	}
-
-	populateOpaqueSummary(result, quote.Response.OpaqueFields)
-	leafFWID, err := extractLeafFWID(leaf)
-	if err != nil {
-		return result, err
-	}
-	result.LeafCertificateFWID = leafFWID
-	result.ReportFWID = hex.EncodeToString(quote.Response.OpaqueFields[opaqueFieldFWID])
-	result.FWIDMatches = result.ReportFWID != "" && strings.EqualFold(result.ReportFWID, result.LeafCertificateFWID)
-	if result.ReportFWID == "" {
-		result.FWIDMatches = false
-		return result, errors.New("quote does not contain FWID opaque field")
-	}
-	if !result.FWIDMatches {
-		return result, fmt.Errorf("fwid mismatch: report=%s leaf=%s", result.ReportFWID, result.LeafCertificateFWID)
-	}
-
-	return result, nil
+	result, _, _, err := verifyDetailed(quoteInput, certChainPEM, rootsPEM, expectedNonceHex, "", "", time.Time{})
+	return result, err
 }
 
 func VerifySerializedEvidence(serializedJSON, rootsPEM []byte, index int, expectedNonceHex string) (*Result, error) {
@@ -398,23 +325,7 @@ func parseSerializedEvidenceEntries(data []byte) ([]SerializedEvidenceEntry, err
 }
 
 func verifySerializedEvidenceEntry(entry SerializedEvidenceEntry, rootsPEM []byte, expectedNonceHex string) (*Result, error) {
-	nonceHex := strings.TrimSpace(expectedNonceHex)
-	if nonceHex == "" {
-		nonceHex = entry.Nonce
-	}
-	certChainPEM, err := base64.StdEncoding.DecodeString(entry.Certificate)
-	if err != nil {
-		return nil, fmt.Errorf("decode serialized certificate chain: %w", err)
-	}
-	quoteRaw, err := base64.StdEncoding.DecodeString(entry.Evidence)
-	if err != nil {
-		return nil, fmt.Errorf("decode serialized quote: %w", err)
-	}
-	result, err := Verify(quoteRaw, certChainPEM, rootsPEM, nonceHex)
-	if result != nil {
-		result.InputFormat = "serialized-json"
-		result.EvidenceArch = entry.Arch
-	}
+	result, _, _, err := verifySerializedEntryDetailed(entry, rootsPEM, expectedNonceHex, time.Time{})
 	return result, err
 }
 

@@ -20,6 +20,7 @@
 ## 추가 문서
 
 - [NVGPU verification 개념 정리](docs/nvgpu-verification.md)
+- [NVGPU verifier 코드 구조와 검증 동작](docs/nvgpu-code-structure.md)
 - [Sample data와 mock data 사용 가이드](docs/sample-and-mock-data.md)
 
 ## NVGPU quote 전체 검증 과정
@@ -164,7 +165,8 @@ go run ./cmd/nvgpu-attest verify \
 ```bash
 go run ./cmd/nvgpu-attest verify \
   --verify-ocsp \
-  --verify-rim
+  --verify-rim \
+  --time 2026-05-25T00:00:00Z
 ```
 
 ### 3) serialized JSON evidence 1개 검증
