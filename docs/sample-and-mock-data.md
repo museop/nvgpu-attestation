@@ -20,9 +20,12 @@ flowchart TD
 
 | 종류 | 위치 | 생성/출처 | 목적 | Trust anchor |
 | --- | --- | --- | --- | --- |
-| NVIDIA split sample | `testdata/hopperAttestationReport.txt`, `testdata/hopperCertChain.txt` | NVIDIA nvtrust/local verifier 샘플 | 실제 Hopper quote 형식 검증 예제 | `testdata/device-root-bundle.pem` |
-| NVIDIA serialized evidence | `testdata/hopper_evidence.json`, `testdata/multi_gpu_hopper.json` | NVIDIA attestation-sdk 샘플 | SDK/JSON evidence 입력 형식 검증 | `testdata/device-root-bundle.pem` |
+| NVIDIA GPU split sample | `testdata/hopperAttestationReport.txt`, `testdata/hopperCertChain.txt` | NVIDIA nvtrust/local verifier 샘플 | 실제 Hopper quote 형식 검증 예제 | `testdata/device-root-bundle.pem` |
+| NVIDIA GPU serialized evidence | `testdata/hopper_evidence.json`, `testdata/multi_gpu_hopper.json` | NVIDIA attestation-sdk 샘플 | SDK/JSON evidence 입력 형식 검증 | `testdata/device-root-bundle.pem` |
 | NVIDIA RIM sample | `testdata/NV_GPU_*.swidtag` | NVIDIA RIM 샘플 | quote measurement를 golden measurement와 비교 | `testdata/verifier_RIM_root.pem` |
+| NVIDIA NVSwitch split sample | `testdata/switchAttestationReport.txt`, `testdata/switchCertChain.txt` | NVIDIA attestation-sdk C++ unit-test 샘플 | LS10 switch attestation report 검증 예제 | `testdata/device-root-bundle.pem` |
+| NVIDIA NVSwitch serialized evidence | `testdata/switch_evidence_ls10.json`, `testdata/multi_switch_ls10.json` | NVIDIA attestation-sdk 샘플 | SDK/JSON NVSwitch evidence 입력 형식 검증 | `testdata/device-root-bundle.pem` |
+| NVIDIA NVSwitch BIOS RIM sample | `testdata/switchVBIOSRim_NV_SWITCH_BIOS_5612_0002_890_9610550001.xml` | NVIDIA attestation-sdk C++ unit-test 샘플 | LS10 switch runtime measurement appraisal | `testdata/verifier_RIM_root.pem` |
 | RIM schema | `testdata/swidSchema2015.xsd` | SWID XML schema | `.swidtag` schema validation | 해당 없음 |
 | Mock root | `mock-root/root-key.pem`, `mock-root/root.pem` | `nvgpu-attest root` | 테스트용 root key/cert 생성 | self-signed mock root |
 | Mock evidence | `mock-evidence/*` | `nvgpu-attest mock` | 자체 root로 검증 가능한 모조 quote 생성 | `mock-evidence/root.pem` 또는 `mock-root/root.pem` |
@@ -42,8 +45,13 @@ flowchart TD
 | `Root-CA.cer`, `Root-CA-L1B.cer` | DER certificate | 위 root cert의 DER 형식 | 직접 디버깅/변환 |
 | `hopper_evidence.json` | JSON array | serialized evidence 단일 엔트리 | `--evidence-json` |
 | `multi_gpu_hopper.json` | JSON array | serialized evidence 4개 엔트리 | `--evidence-json`, `--all-evidence` |
+| `switchAttestationReport.txt` | hex text report | NVSwitch LS10 split-file 입력의 report 본문 | `nvswitch-attest verify --report` |
+| `switchCertChain.txt` | PEM certificates | NVSwitch report와 함께 제공된 device certificate chain | `nvswitch-attest verify --cert-chain` |
+| `switch_evidence_ls10.json` | JSON array | NVSwitch LS10 serialized evidence 단일 엔트리 | `nvswitch-attest verify --evidence-json` |
+| `multi_switch_ls10.json` | JSON array | NVSwitch LS10 serialized evidence 4개 엔트리 | `nvswitch-attest verify --evidence-json --all-evidence` |
 | `NV_GPU_DRIVER_GH100_550.90.07.swidtag` | SWID XML + XML DSIG | driver RIM / golden measurements | `--driver-rim` |
 | `NV_GPU_VBIOS_1010_0200_882_96009F0001.swidtag` | SWID XML + XML DSIG | VBIOS RIM / golden measurements | `--vbios-rim` |
+| `switchVBIOSRim_NV_SWITCH_BIOS_5612_0002_890_9610550001.xml` | SWID XML + XML DSIG | NVSwitch BIOS RIM / golden measurements | `nvswitch-attest verify --switch-bios-rim` |
 | `verifier_RIM_root.pem` | PEM certificate | RIM embedded cert chain 검증 root | `--rim-root` |
 | `swidSchema2015.xsd` | XML Schema | RIM `.swidtag` schema validation | `--swid-schema` |
 
@@ -167,6 +175,59 @@ go run ./cmd/nvgpu-attest verify \
 7. active golden measurements와 quote runtime measurements를 비교합니다.
 
 > 현재 샘플 driver RIM certificate는 `2026-06-01T02:08:29Z` 이후 현재 시간 기준으로 만료됩니다. 재현 목적이면 위 예시처럼 `--time 2026-05-25T00:00:00Z`를 지정하세요. 운영 검증에는 최신 RIM을 사용해야 합니다.
+
+### 2.4 NVSwitch LS10 sample
+
+NVSwitch sample은 별도 CLI인 `nvswitch-attest`로 검증합니다.
+
+기본 split-file 검증:
+
+```bash
+go run ./cmd/nvswitch-attest verify \
+  --report ./testdata/switchAttestationReport.txt \
+  --cert-chain ./testdata/switchCertChain.txt \
+  --roots ./testdata/device-root-bundle.pem \
+  --nonce 931d8dd0add203ac3d8b4fbde75e115278eefcdceac5b87671a748f32364dfcb \
+  --json
+```
+
+serialized JSON 검증:
+
+```bash
+go run ./cmd/nvswitch-attest verify \
+  --evidence-json ./testdata/switch_evidence_ls10.json \
+  --roots ./testdata/device-root-bundle.pem \
+  --json
+```
+
+multi-switch JSON 전체 검증:
+
+```bash
+go run ./cmd/nvswitch-attest verify \
+  --evidence-json ./testdata/multi_switch_ls10.json \
+  --all-evidence \
+  --roots ./testdata/device-root-bundle.pem \
+  --json
+```
+
+NVSwitch BIOS RIM + measurement 검증:
+
+```bash
+go run ./cmd/nvswitch-attest verify \
+  --verify-rim \
+  --switch-bios-rim ./testdata/switchVBIOSRim_NV_SWITCH_BIOS_5612_0002_890_9610550001.xml \
+  --rim-root ./testdata/verifier_RIM_root.pem \
+  --swid-schema ./testdata/swidSchema2015.xsd \
+  --time 2026-05-20T00:00:00Z \
+  --skip-rim-ocsp \
+  --json
+```
+
+주의:
+
+- NVIDIA attestation-sdk의 switch sample RIM은 unit-test/staging 성격의 artifact라 현재 날짜 기준 certificate validity 또는 public OCSP freshness 검증에 실패할 수 있습니다.
+- `--skip-rim-ocsp`는 이 샘플 재현을 위한 옵션입니다. 운영 검증에서는 RIM cert chain, RIM XML signature, measurement 비교뿐 아니라 RIM certificate OCSP/freshness 정책도 유지해야 합니다.
+- 현재 구현은 LS10 RIM ID 규칙(`NV_SWITCH_BIOS_5612_0002_890_<BIOS version>`)을 지원합니다.
 
 ## 3. Mock 데이터
 

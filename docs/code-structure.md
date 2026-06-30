@@ -16,6 +16,7 @@
 | `rim_signature.go` | RIM XML DSIG digest/signature 검증 | `verifyRIMSignature`, `canonicalizeXML` |
 | `measurement.go` | quote runtime measurement와 RIM golden measurement 비교 | `compareMeasurements`, `activeGoldenMeasurements`, `Response.getMeasurements` |
 | `policy.go` | 서비스 정책 appraisal | `AppraisePolicy`, `PolicyOptions` |
+| `switch_verify.go` | NVSwitch LS10 attestation report 검증과 BIOS RIM/measurement appraisal | `VerifySwitchFilesWithOptions`, `VerifySwitchSerializedEvidenceFileWithOptions`, `VerifySwitchSerializedEvidenceAllFileWithOptions` |
 | `mock.go` | 테스트/교육용 mock root/evidence 생성 | `GenerateMockRootBundle`, `GenerateMockQuoteBundleFromRoot` |
 | `tempfile.go` | `openssl`, `xmllint` 호출을 위한 임시 파일 helper | `writeTempPEM`, `writeTempBytes` |
 
@@ -38,6 +39,8 @@ optional enrichResult
   ├─ rim.go + rim_signature.go + measurement.go: RIM + measurement appraisal
   └─ policy.go: relying-party policy appraisal
 ```
+
+NVSwitch는 별도 CLI `cmd/nvswitch-attest`에서 `switch_verify.go`의 API를 호출합니다. report 구조와 signature 방식은 GPU quote parser 일부를 재사용하지만, FWID opaque field는 optional로 처리하고 BIOS version/RIM ID/measurement 비교는 LS10 switch 규칙을 적용합니다.
 
 ## 2. Public API와 입력 형식
 

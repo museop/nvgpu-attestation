@@ -93,10 +93,12 @@ func loadAndVerifyRIM(id, source, expectedVersion, localPath string, opts Verify
 		return nil, info, fmt.Errorf("%s rim cert chain verification failed: %w", source, err)
 	}
 	info.CertChainVerified = true
-	checks, err := checkOCSPChain(doc.Certs, 0, opts.OCSPURL)
-	info.OCSPChecks = checks
-	if err != nil {
-		return nil, info, fmt.Errorf("%s rim ocsp verification failed: %w", source, err)
+	if !opts.SkipRIMOCSP {
+		checks, err := checkOCSPChain(doc.Certs, 0, opts.OCSPURL)
+		info.OCSPChecks = checks
+		if err != nil {
+			return nil, info, fmt.Errorf("%s rim ocsp verification failed: %w", source, err)
+		}
 	}
 	if err := verifyRIMSignature(doc); err != nil {
 		return nil, info, fmt.Errorf("%s rim signature verification failed: %w", source, err)

@@ -19,6 +19,7 @@ type VerifyOptions struct {
 	VBIOSRIMPath     string
 	RIMRootPEM       string
 	SWIDSchemaXSD    string
+	SkipRIMOCSP      bool
 	VerificationTime time.Time
 	Policy           PolicyOptions
 }
