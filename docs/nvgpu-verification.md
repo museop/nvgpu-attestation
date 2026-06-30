@@ -99,7 +99,7 @@ go run ./cmd/nvgpu-attest \
 
 ## Quote 형식: 이 저장소 파서 기준
 
-> NVIDIA 공개 문서가 모든 bit/byte offset을 완전한 규격으로 공개한다고 가정하면 안 됩니다. 아래 표는 `internal/nvgpu/verify.go`의 `ParseQuote` 구현과 Hopper 샘플 evidence를 기준으로 정리한 **구현 기준 구조**입니다.
+> NVIDIA 공개 문서가 모든 bit/byte offset을 완전한 규격으로 공개한다고 가정하면 안 됩니다. 아래 표는 `internal/attest/quote.go`의 `ParseQuote` 구현과 Hopper 샘플 evidence를 기준으로 정리한 **구현 기준 구조**입니다.
 
 전체 quote는 다음처럼 나뉩니다.
 
@@ -143,7 +143,7 @@ response = response_header(8 bytes)
 
 ### Measurement record
 
-`measurement_record`에는 GPU가 측정한 runtime measurement들이 들어 있습니다. 이 저장소의 `Response.getMeasurements()`는 각 block을 다음처럼 읽습니다.
+`measurement_record`에는 GPU가 측정한 runtime measurement들이 들어 있습니다. 이 저장소의 `Response.GetMeasurements()`는 각 block을 다음처럼 읽습니다.
 
 ```text
 measurement_block = index(1) || spec(1) || block_size(2 LE) || block_payload

@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/museop/nvgpu-attestation/internal/nvgpu"
+	"github.com/museop/nvgpu-attestation/internal/nvswitch"
 	"github.com/spf13/cobra"
 )
 
@@ -115,7 +115,7 @@ func runVerify(cfg *verifyConfig) error {
 	if err != nil {
 		return err
 	}
-	opts := nvgpu.SwitchVerifyOptions{
+	opts := nvswitch.VerifyOptions{
 		VerifyOCSP:        cfg.verifyOCSP,
 		VerifyRIM:         cfg.verifyRIM,
 		SwitchBIOSRIMPath: cfg.switchBIOSRIM,
@@ -126,21 +126,21 @@ func runVerify(cfg *verifyConfig) error {
 	}
 
 	var (
-		result       *nvgpu.SwitchResult
-		batchResults []nvgpu.SwitchBatchItem
+		result       *nvswitch.Result
+		batchResults []nvswitch.BatchItem
 	)
 	if cfg.evidenceJSONPath != "" {
 		if cfg.allEvidence {
-			batchResults, err = nvgpu.VerifySwitchSerializedEvidenceAllFileWithOptions(cfg.evidenceJSONPath, cfg.rootsPath, cfg.nonce, opts)
+			batchResults, err = nvswitch.VerifySerializedEvidenceAllFileWithOptions(cfg.evidenceJSONPath, cfg.rootsPath, cfg.nonce, opts)
 		} else {
-			result, err = nvgpu.VerifySwitchSerializedEvidenceFileWithOptions(cfg.evidenceJSONPath, cfg.rootsPath, cfg.evidenceIndex, cfg.nonce, opts)
+			result, err = nvswitch.VerifySerializedEvidenceFileWithOptions(cfg.evidenceJSONPath, cfg.rootsPath, cfg.evidenceIndex, cfg.nonce, opts)
 		}
 	} else {
 		effectiveNonce := cfg.nonce
 		if effectiveNonce == "" {
 			effectiveNonce = defaultSwitchSampleNonce
 		}
-		result, err = nvgpu.VerifySwitchFilesWithOptions(cfg.reportPath, cfg.certChainPath, cfg.rootsPath, effectiveNonce, opts)
+		result, err = nvswitch.VerifyFilesWithOptions(cfg.reportPath, cfg.certChainPath, cfg.rootsPath, effectiveNonce, opts)
 	}
 
 	if cfg.jsonOut {
@@ -150,10 +150,10 @@ func runVerify(cfg *verifyConfig) error {
 				ok = ok && item.OK
 			}
 			payload := struct {
-				OK      bool                    `json:"ok"`
-				Count   int                     `json:"count"`
-				Results []nvgpu.SwitchBatchItem `json:"results,omitempty"`
-				Error   string                  `json:"error,omitempty"`
+				OK      bool                 `json:"ok"`
+				Count   int                  `json:"count"`
+				Results []nvswitch.BatchItem `json:"results,omitempty"`
+				Error   string               `json:"error,omitempty"`
 			}{OK: ok, Count: len(batchResults), Results: batchResults}
 			if err != nil {
 				payload.Error = err.Error()
@@ -170,9 +170,9 @@ func runVerify(cfg *verifyConfig) error {
 			return nil
 		}
 		payload := struct {
-			OK     bool                `json:"ok"`
-			Result *nvgpu.SwitchResult `json:"result,omitempty"`
-			Error  string              `json:"error,omitempty"`
+			OK     bool             `json:"ok"`
+			Result *nvswitch.Result `json:"result,omitempty"`
+			Error  string           `json:"error,omitempty"`
 		}{OK: err == nil, Result: result}
 		if err != nil {
 			payload.Error = err.Error()
@@ -217,7 +217,7 @@ func runVerify(cfg *verifyConfig) error {
 	return nil
 }
 
-func printResult(result *nvgpu.SwitchResult) {
+func printResult(result *nvswitch.Result) {
 	fmt.Printf("report sha256           : %s\n", result.ReportSHA256)
 	fmt.Printf("input format            : %s\n", result.InputFormat)
 	if result.EvidenceArch != "" {

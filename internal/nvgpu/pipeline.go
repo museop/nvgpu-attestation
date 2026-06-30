@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/museop/nvgpu-attestation/internal/attest"
 )
 
 // VerifyFilesWithOptions runs the complete verifier pipeline for split quote
@@ -36,7 +38,7 @@ func VerifySerializedEvidenceFileWithOptions(jsonPath, rootsPath string, index i
 	if err != nil {
 		return nil, fmt.Errorf("read roots: %w", err)
 	}
-	entries, err := parseSerializedEvidenceEntries(jsonData)
+	entries, err := attest.ParseSerializedEvidenceEntries(jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +64,7 @@ func VerifySerializedEvidenceAllFileWithOptions(jsonPath, rootsPath, expectedNon
 	if err != nil {
 		return nil, fmt.Errorf("read roots: %w", err)
 	}
-	entries, err := parseSerializedEvidenceEntries(jsonData)
+	entries, err := attest.ParseSerializedEvidenceEntries(jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -117,30 +119,30 @@ func verifySerializedEntryDetailed(entry SerializedEvidenceEntry, rootsPEM []byt
 // APIs and the option-aware APIs. It intentionally stops before network/RIM
 // appraisal so callers can inspect partial local-verification results on error.
 func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex, inputFormat, evidenceArch string, verificationTime time.Time) (*Result, *Quote, []*x509.Certificate, error) {
-	quoteRaw, err := decodeHexOrRaw(quoteInput)
+	quoteRaw, err := attest.DecodeHexOrRaw(quoteInput)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("decode quote: %w", err)
 	}
-	quote, err := ParseQuote(quoteRaw)
+	quote, err := attest.ParseQuote(quoteRaw)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	chain, err := parsePEMCertificates(certChainPEM)
+	chain, err := attest.ParsePEMCertificates(certChainPEM)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("parse cert chain: %w", err)
 	}
 	if len(chain) == 0 {
 		return nil, nil, nil, errors.New("certificate chain is empty")
 	}
-	roots, rootPool, err := parseRootBundle(rootsPEM)
+	roots, rootPool, err := attest.ParseRootBundle(rootsPEM)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("parse root bundle: %w", err)
 	}
-	expectedNonce, err := parseNonce(expectedNonceHex)
+	expectedNonce, err := attest.ParseNonce(expectedNonceHex)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	verifiedChains, err := verifyCertChain(chain, roots, rootPool, verificationTime)
+	verifiedChains, err := attest.VerifyCertChain(chain, roots, rootPool, verificationTime)
 	if err != nil {
 		return nil, nil, chain, err
 	}
@@ -157,7 +159,7 @@ func verifyDetailed(quoteInput, certChainPEM, rootsPEM []byte, expectedNonceHex,
 
 func newVerificationResult(quote *Quote, leaf *x509.Certificate, expectedNonce []byte, verifiedChains [][]string, inputFormat, evidenceArch string, verificationTime time.Time) *Result {
 	result := &Result{
-		QuoteSHA256:             sha256Hex(quote.Raw),
+		QuoteSHA256:             attest.SHA256Hex(quote.Raw),
 		CertChainVerified:       true,
 		ExpectedNonce:           hex.EncodeToString(expectedNonce),
 		QuoteNonce:              hex.EncodeToString(quote.Request.Nonce),
@@ -186,7 +188,7 @@ func verifyNonce(result *Result) error {
 // verifyQuoteBinding proves that the already-verified certificate chain is the
 // one that signed this quote, then binds the report FWID to the leaf FWID.
 func verifyQuoteBinding(result *Result, quote *Quote, leaf *x509.Certificate) error {
-	sigOK, err := verifyQuoteSignature(quote.Raw, quote.Response.Signature, leaf.PublicKey)
+	sigOK, err := attest.VerifyReportSignature(quote.Raw, quote.Response.Signature, leaf.PublicKey)
 	if err != nil {
 		return err
 	}
@@ -196,7 +198,7 @@ func verifyQuoteBinding(result *Result, quote *Quote, leaf *x509.Certificate) er
 	}
 
 	populateOpaqueSummary(result, quote.Response.OpaqueFields)
-	leafFWID, err := extractLeafFWID(leaf)
+	leafFWID, err := attest.ExtractLeafFWID(leaf)
 	if err != nil {
 		return err
 	}
@@ -221,7 +223,7 @@ func enrichResult(result *Result, quote *Quote, chain []*x509.Certificate, opts 
 		opts.RIMServiceURL = defaultRIMServiceURL
 	}
 	if opts.VerifyOCSP {
-		checks, err := checkOCSPChain(chain, 1, opts.OCSPURL)
+		checks, err := attest.CheckOCSPChain(chain, 1, opts.OCSPURL)
 		result.DeviceOCSPChecks = checks
 		if err != nil {
 			return err

@@ -1,4 +1,4 @@
-package nvgpu
+package attest
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ var (
 	reXMLNS          = regexp.MustCompile(`xmlns(?::[A-Za-z0-9_]+)?="[^"]+"`)
 )
 
-func verifyRIMSignature(doc *rimDocument) error {
+func verifyRIMSignature(doc *RIMDocument) error {
 	withoutSig := reSignatureOpen.ReplaceAll(doc.Raw, nil)
 	c14nDocument, err := canonicalizeXML(withoutSig)
 	if err != nil {

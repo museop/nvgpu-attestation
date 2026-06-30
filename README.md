@@ -20,7 +20,7 @@
 ## 추가 문서
 
 - [NVGPU verification 개념 정리](docs/nvgpu-verification.md)
-- [NVGPU verifier 코드 구조와 검증 동작](docs/nvgpu-code-structure.md)
+- [NVGPU verifier 코드 구조와 검증 동작](docs/code-structure.md)
 - [Sample data와 mock data 사용 가이드](docs/sample-and-mock-data.md)
 
 ## NVGPU quote 전체 검증 과정

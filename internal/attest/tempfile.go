@@ -1,4 +1,4 @@
-package nvgpu
+package attest
 
 import (
 	"crypto/x509"
@@ -12,14 +12,19 @@ func writeTempPEM(cert *x509.Certificate) (string, error) {
 }
 
 func writeTempBytes(data []byte, suffix string) (string, error) {
-	f, err := os.CreateTemp("", "nvgpu-*"+suffix)
+	file, err := os.CreateTemp("", "nvgpu-attest-*"+suffix)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	if _, err := f.Write(data); err != nil {
-		os.Remove(f.Name())
+	path := file.Name()
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		os.Remove(path)
 		return "", err
 	}
-	return filepath.Clean(f.Name()), nil
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return "", err
+	}
+	return filepath.Clean(path), nil
 }

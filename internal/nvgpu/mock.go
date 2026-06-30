@@ -18,9 +18,13 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"github.com/museop/nvgpu-attestation/internal/attest"
 )
 
 const MockDefaultNonce = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+var mockFWIDOID = []int{2, 23, 133, 5, 4, 1, 1}
 
 // MockQuoteOptions controls generation of test-only NVGPU-like evidence.
 // The generated roots and quotes are deliberately self-signed/test-scoped and
@@ -137,7 +141,7 @@ func GenerateMockQuoteBundleFromRoot(opts MockQuoteOptions) (*MockQuoteBundle, e
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	nonce, err := parseNonce(opts.NonceHex)
+	nonce, err := attest.ParseNonce(opts.NonceHex)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +181,7 @@ func GenerateMockQuoteBundleFromRoot(opts MockQuoteOptions) (*MockQuoteBundle, e
 		EvidenceJSON:  evidenceJSON,
 		RootCert:      opts.RootCert,
 		LeafCert:      leafCert,
-		QuoteSHA256:   sha256Hex(quoteRaw),
+		QuoteSHA256:   attest.SHA256Hex(quoteRaw),
 		DriverVersion: opts.DriverVersion,
 		VBIOSVersion:  opts.VBIOSVersion,
 	}, nil
@@ -203,7 +207,7 @@ func ParseECPrivateKeyPEM(data []byte) (*ecdsa.PrivateKey, error) {
 }
 
 func ParseSingleCertificatePEM(data []byte) (*x509.Certificate, error) {
-	certs, err := parsePEMCertificates(data)
+	certs, err := attest.ParsePEMCertificates(data)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +266,7 @@ func createMockLeaf(leafKey, rootKey *ecdsa.PrivateKey, rootCert *x509.Certifica
 		BasicConstraintsValid: true,
 		IsCA:                  false,
 		ExtraExtensions: []pkix.Extension{{
-			Id:       hopperFWIDOID1,
+			Id:       mockFWIDOID,
 			Critical: false,
 			Value:    append([]byte(nil), fwid...),
 		}},
@@ -279,7 +283,7 @@ func createMockLeaf(leafKey, rootKey *ecdsa.PrivateKey, rootCert *x509.Certifica
 }
 
 func buildMockQuote(nonce []byte, signingKey *ecdsa.PrivateKey, fwid []byte, driverVersion, vbiosVersion string, measurementCount int) ([]byte, error) {
-	request := make([]byte, requestLength)
+	request := make([]byte, attest.RequestLength)
 	request[0] = 0x11
 	request[1] = 0xe0
 	copy(request[4:36], nonce)
@@ -290,7 +294,7 @@ func buildMockQuote(nonce []byte, signingKey *ecdsa.PrivateKey, fwid []byte, dri
 	if err != nil {
 		return nil, err
 	}
-	response := make([]byte, 8, 8+len(measurementRecord)+32+2+len(opaque)+signatureLength)
+	response := make([]byte, 8, 8+len(measurementRecord)+32+2+len(opaque)+attest.SignatureLength)
 	response[0] = 0x11
 	response[1] = 0x60
 	response[4] = byte(measurementCount)
@@ -370,7 +374,7 @@ func rawVBIOSVersionForFormatted(version string) ([]byte, error) {
 	if compact == "" {
 		compact = "96009f0001"
 	}
-	if len(compact) < 2 || len(compact)%2 != 0 || !isHex([]byte(compact)) {
+	if len(compact) < 2 || len(compact)%2 != 0 || !attest.IsHex([]byte(compact)) {
 		return nil, fmt.Errorf("vbios version must be dot-separated hex bytes, got %q", version)
 	}
 	// formatVBIOSVersion(raw) emits hexLE[half:] + hexLE[half-2:half].
@@ -407,14 +411,14 @@ func signP384Raw(key *ecdsa.PrivateKey, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sign mock quote: %w", err)
 	}
-	sig := make([]byte, signatureLength)
+	sig := make([]byte, attest.SignatureLength)
 	if r.BitLen() > 384 || s.BitLen() > 384 {
 		return nil, errors.New("ecdsa signature component too large for P-384 raw encoding")
 	}
 	rb := r.Bytes()
 	sb := s.Bytes()
-	copy(sig[signatureLength/2-len(rb):signatureLength/2], rb)
-	copy(sig[signatureLength-len(sb):], sb)
+	copy(sig[attest.SignatureLength/2-len(rb):attest.SignatureLength/2], rb)
+	copy(sig[attest.SignatureLength-len(sb):], sb)
 	return sig, nil
 }
 
